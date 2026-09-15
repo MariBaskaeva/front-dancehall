@@ -103,3 +103,6 @@ jobs:
           scp -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes \
             -i ~/.ssh/deploy_key frontend/* \
             "dancehall-deploy@87.242.119.237:incoming/frontend/$REVISION/"
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes \
+            -i ~/.ssh/deploy_key dancehall-deploy@87.242.119.237 \
+            "sudo /usr/local/sbin/dancehall-deploy-frontend $REVISION"
