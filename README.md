@@ -1,7 +1,7 @@
 # front-dancehall
 
-Frontend-каркас Dancehall на React, TypeScript и Vite. Стартовая страница
-проверяет backend запросом `GET /api/ping`.
+Frontend каталога Dancehall Steps на React, TypeScript и Vite. Контракт API —
+[`openapi.yaml`](openapi.yaml).
 
 ## Требования
 
@@ -10,15 +10,19 @@ Frontend-каркас Dancehall на React, TypeScript и Vite. Стартова
 
 ## Локальный запуск
 
-Запустите backend на `http://127.0.0.1:8080`, затем:
-
 ```bash
 npm ci
 npm run dev
 ```
 
-Vite проксирует `/api/*` в локальный backend и удаляет префикс `/api`, поэтому
-frontend всегда использует тот же относительный адрес, что и в production.
+Frontend обращается к `/api/v1/steps`, `/api/v1/steps/{slug}` и
+`/api/v1/authors`. Vite проксирует `/api/*` в backend на
+`http://127.0.0.1:8080`, удаляя префикс `/api`. Пока backend не реализован,
+приложение показывает состояние недоступного каталога или ошибку соединения;
+тестовые данные не подставляются.
+
+Каталог доступен по `/`, карточка степа — по `/steps/:slug`. Поиск и фильтры
+сохраняются в URL; прямые ссылки и кнопки назад/вперёд работают через History API.
 
 ## Проверки
 
@@ -26,9 +30,9 @@ frontend всегда использует тот же относительны�
 npm run check
 ```
 
-Команда проверяет lint, форматирование, типы, production build и доступность
-собранного HTML и JavaScript через HTTP. Unit-, component- и E2E-тесты в
-начальный каркас не входят.
+Команда запускает lint, проверку форматирования, TypeScript, Vitest, production
+build и HTTP smoke-тест статических маршрутов. Отдельно тесты запускаются через
+`npm test`.
 
 ## Production
 
@@ -39,4 +43,8 @@ GitHub Actions упаковывает `dist` в проверяемый стат�
 `PRODUCTION_DEPLOY_ENABLED=false`. После установки серверного deploy script и
 добавления environment secrets `DEPLOY_SSH_KEY` и `DEPLOY_KNOWN_HOSTS` переменную
 нужно переключить в `true`; последующие push в `main` будут деплоиться автоматически.
-Nginx обслуживает frontend по `/`, а запросы `/api/*` проксирует в backend.
+
+Nginx обслуживает frontend по `/`, а `/api/*` проксирует в backend. Для прямых
+ссылок на `/steps/:slug` Nginx должен отдавать `index.html` через SPA fallback
+(`try_files $uri $uri/ /index.html`) только для frontend-маршрутов; API нельзя
+перехватывать этим fallback.

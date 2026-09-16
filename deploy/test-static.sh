@@ -72,5 +72,16 @@ if (!assetResponse.ok) {
   throw new Error(`JavaScript asset returned ${assetResponse.status}`)
 }
 
+const detailResponse = await fetch(`${baseUrl}/steps/example`, {
+  signal: AbortSignal.timeout(2_000),
+})
+if (!detailResponse.ok) {
+  throw new Error(`Direct step route returned ${detailResponse.status}`)
+}
+const detailHtml = await detailResponse.text()
+if (!detailHtml.includes(marker)) {
+  throw new Error('Direct step route did not return the SPA shell')
+}
+
 console.log(`Static frontend smoke test passed for revision ${revision}`)
 NODE

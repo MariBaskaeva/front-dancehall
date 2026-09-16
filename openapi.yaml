@@ -1,0 +1,441 @@
+openapi: 3.1.0
+
+info:
+  title: Dancehall Steps API
+  version: 1.0.0
+  description: |
+    Публичный read-only API каталога dancehall-степов.
+
+    Весь пользовательский контент возвращается на русском языке. API не
+    требует авторизации и не предоставляет операций создания, изменения или
+    удаления данных.
+
+servers:
+  - url: /api/v1
+    description: API относительно origin frontend-приложения
+
+security: []
+
+tags:
+  - name: Steps
+    description: Поиск и просмотр dancehall-степов
+  - name: Authors
+    description: Справочник авторов для фильтра каталога
+
+paths:
+  /steps:
+    get:
+      tags:
+        - Steps
+      operationId: listSteps
+      summary: Получить каталог степов
+      description: |
+        Возвращает страницу степов. Несколько значений одного фильтра
+        объединяются через OR, а разные фильтры — через AND.
+
+        Элементы всегда упорядочиваются по `name` по возрастанию, затем по
+        `id`.
+      parameters:
+        - $ref: "#/components/parameters/SearchQuery"
+        - $ref: "#/components/parameters/StyleFilter"
+        - $ref: "#/components/parameters/EraFilter"
+        - $ref: "#/components/parameters/AuthorFilter"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: Страница степов
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StepPage"
+              examples:
+                firstPage:
+                  $ref: "#/components/examples/StepPage"
+                emptyPage:
+                  $ref: "#/components/examples/EmptyStepPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /steps/{slug}:
+    get:
+      tags:
+        - Steps
+      operationId: getStepBySlug
+      summary: Получить степ по slug
+      parameters:
+        - $ref: "#/components/parameters/StepSlug"
+      responses:
+        "200":
+          description: Степ найден
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Step"
+              examples:
+                step:
+                  $ref: "#/components/examples/Step"
+        "404":
+          $ref: "#/components/responses/StepNotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /authors:
+    get:
+      tags:
+        - Authors
+      operationId: listAuthors
+      summary: Получить справочник авторов
+      description: |
+        Возвращает полный непагинированный список авторов, отсортированный по
+        `name` по возрастанию. Справочник предназначен для заполнения фильтра
+        каталога степов.
+      responses:
+        "200":
+          description: Список авторов
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthorCollection"
+              examples:
+                authors:
+                  $ref: "#/components/examples/AuthorCollection"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+components:
+  parameters:
+    SearchQuery:
+      name: q
+      in: query
+      required: false
+      description: |
+        Подстрока для поиска по `name` без учёта регистра. Пустую строку
+        следует передавать как отсутствие параметра.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+      example: богл
+
+    StyleFilter:
+      name: style
+      in: query
+      required: false
+      description: |
+        Допустимые стили. Параметр можно повторять, например
+        `?style=FEMALE&style=MALE`.
+      style: form
+      explode: true
+      schema:
+        type: array
+        uniqueItems: true
+        items:
+          $ref: "#/components/schemas/StepStyle"
+
+    EraFilter:
+      name: era
+      in: query
+      required: false
+      description: |
+        Допустимые эры. Параметр можно повторять, например
+        `?era=OLD_SCHOOL&era=MIDDLE_SCHOOL`.
+      style: form
+      explode: true
+      schema:
+        type: array
+        uniqueItems: true
+        items:
+          $ref: "#/components/schemas/StepEra"
+
+    AuthorFilter:
+      name: author
+      in: query
+      required: false
+      description: |
+        Slug авторов. Параметр можно повторять; полный набор допустимых
+        значений возвращает `GET /authors`.
+      style: form
+      explode: true
+      schema:
+        type: array
+        uniqueItems: true
+        items:
+          $ref: "#/components/schemas/Slug"
+      example:
+        - bogle
+
+    Page:
+      name: page
+      in: query
+      required: false
+      description: Номер страницы, начиная с нуля.
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
+        default: 0
+      example: 0
+
+    Size:
+      name: size
+      in: query
+      required: false
+      description: Количество элементов на странице.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 100
+        default: 20
+      example: 20
+
+    StepSlug:
+      name: slug
+      in: path
+      required: true
+      description: Неизменяемый после публикации slug степа.
+      schema:
+        $ref: "#/components/schemas/Slug"
+      example: bogle
+
+  schemas:
+    Slug:
+      type: string
+      minLength: 1
+      maxLength: 120
+      pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      description: Уникальный URL-safe идентификатор в нижнем регистре.
+
+    StepStyle:
+      type: string
+      enum:
+        - FEMALE
+        - MALE
+      description: Стиль исполнения степа.
+
+    StepEra:
+      type: string
+      enum:
+        - OLD_SCHOOL
+        - MIDDLE_SCHOOL
+        - NEW_SCHOOL
+      description: Эра, к которой относится степ.
+
+    Author:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - slug
+        - name
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+          description: Неизменяемый идентификатор автора.
+        slug:
+          $ref: "#/components/schemas/Slug"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Имя автора на русском языке.
+
+    Step:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - slug
+        - name
+        - style
+        - era
+        - author
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+          description: Неизменяемый идентификатор степа.
+        slug:
+          $ref: "#/components/schemas/Slug"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Название степа на русском языке.
+        style:
+          $ref: "#/components/schemas/StepStyle"
+        era:
+          $ref: "#/components/schemas/StepEra"
+        author:
+          $ref: "#/components/schemas/Author"
+
+    StepPage:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+        - page
+        - size
+        - totalElements
+        - totalPages
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Step"
+        page:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Номер текущей страницы, начиная с нуля.
+        size:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 100
+          description: Запрошенный размер страницы.
+        totalElements:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Общее количество степов с учётом фильтров.
+        totalPages:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Общее количество страниц с учётом фильтров.
+
+    AuthorCollection:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Author"
+
+    Problem:
+      type: object
+      description: Описание ошибки в формате Problem Details.
+      required:
+        - title
+        - status
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          default: about:blank
+          description: URI, идентифицирующий тип ошибки.
+        title:
+          type: string
+          description: Краткое описание типа ошибки.
+        status:
+          type: integer
+          minimum: 100
+          maximum: 599
+          description: HTTP-статус ответа.
+        detail:
+          type: string
+          description: Описание конкретной ошибки.
+        instance:
+          type: string
+          format: uri-reference
+          description: URI, идентифицирующий конкретное возникновение ошибки.
+
+  responses:
+    BadRequest:
+      description: Некорректные параметры запроса
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            invalidSize:
+              value:
+                type: https://dancehall.example/problems/invalid-request
+                title: Некорректный запрос
+                status: 400
+                detail: Параметр size должен быть в диапазоне от 1 до 100.
+                instance: /api/v1/steps?size=101
+
+    StepNotFound:
+      description: Степ с указанным slug не найден
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            notFound:
+              value:
+                type: https://dancehall.example/problems/step-not-found
+                title: Степ не найден
+                status: 404
+                detail: Степ с slug unknown-step не найден.
+                instance: /api/v1/steps/unknown-step
+
+    InternalServerError:
+      description: Внутренняя ошибка сервера
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            internalError:
+              value:
+                type: https://dancehall.example/problems/internal-error
+                title: Внутренняя ошибка сервера
+                status: 500
+                detail: Не удалось обработать запрос.
+
+  examples:
+    Step:
+      value:
+        id: 1f891828-92f8-4ff4-82f7-4b3f1ab6277e
+        slug: bogle
+        name: Богл
+        style: MALE
+        era: OLD_SCHOOL
+        author:
+          id: 6c9ee243-997a-4997-9236-5a5ef855791f
+          slug: bogle
+          name: Богл
+
+    StepPage:
+      value:
+        items:
+          - id: 1f891828-92f8-4ff4-82f7-4b3f1ab6277e
+            slug: bogle
+            name: Богл
+            style: MALE
+            era: OLD_SCHOOL
+            author:
+              id: 6c9ee243-997a-4997-9236-5a5ef855791f
+              slug: bogle
+              name: Богл
+        page: 0
+        size: 20
+        totalElements: 1
+        totalPages: 1
+
+    EmptyStepPage:
+      value:
+        items: []
+        page: 0
+        size: 20
+        totalElements: 0
+        totalPages: 0
+
+    AuthorCollection:
+      value:
+        items:
+          - id: 6c9ee243-997a-4997-9236-5a5ef855791f
+            slug: bogle
+            name: Богл
