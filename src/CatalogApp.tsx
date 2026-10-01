@@ -27,9 +27,11 @@ const styleLabels: Record<StepStyle, string> = {
   MALE: "Male",
 };
 const eraLabels: Record<StepEra, string> = {
-  OLD_SCHOOL: "Old school",
-  MIDDLE_SCHOOL: "Middle school",
-  NEW_SCHOOL: "New school",
+  OLD: "Old school",
+  MIDDLE: "Middle school",
+  EARLY_NEW: "Early new school",
+  NEW: "New school",
+  UNKNOWN: "Неизвестная эра",
 };
 type LoadState<T> = { data?: T; error?: ApiError; loading: boolean };
 
@@ -112,7 +114,11 @@ function StepFacts({ step }: { step: Step }) {
 
 function StepCard({ step, from }: { step: Step; from: string }) {
   return (
-    <Link className="step-card" to={`/steps/${step.slug}`} state={{ from }}>
+    <Link
+      className="step-card"
+      to={`/steps/${encodeURIComponent(step.slug)}`}
+      state={{ from }}
+    >
       <div className="step-card__top">
         <span className="step-card__eyebrow">Dancehall step</span>
         <span className="step-card__arrow" aria-hidden="true">
@@ -120,7 +126,7 @@ function StepCard({ step, from }: { step: Step; from: string }) {
         </span>
       </div>
       <h3>{step.name}</h3>
-      <p>Автор: {step.author.name}</p>
+      <p>Автор: {step.author?.name ?? "Не указан"}</p>
       <StepFacts step={step} />
     </Link>
   );
@@ -133,16 +139,14 @@ function readFilters(params: URLSearchParams): StepFilters {
       ? Number(rawPage)
       : 0;
   return {
-    q: (params.get("q") ?? "").slice(0, 200),
+    q: params.get("q") ?? "",
     styles: [...new Set(params.getAll("style"))].filter(
       (value): value is StepStyle => STYLES.includes(value as StepStyle),
     ),
     eras: [...new Set(params.getAll("era"))].filter((value): value is StepEra =>
       ERAS.includes(value as StepEra),
     ),
-    authors: [...new Set(params.getAll("author"))].filter((value) =>
-      /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value),
-    ),
+    authors: [...new Set(params.getAll("author"))],
     page,
   };
 }
@@ -194,7 +198,7 @@ function Catalog() {
         setParams(
           writeFilters({
             ...filters,
-            q: draftQuery.trim().slice(0, 200),
+            q: draftQuery.trim(),
             page: 0,
           }),
         ),
@@ -386,8 +390,8 @@ function Catalog() {
             </div>
             {page && !steps.error && (
               <span className="result-count">
-                {page.totalElements}{" "}
-                {page.totalElements === 1 ? "степ" : "степов"}
+                {page.page.totalElements}{" "}
+                {page.page.totalElements === 1 ? "степ" : "степов"}
               </span>
             )}
           </div>
@@ -397,7 +401,6 @@ function Catalog() {
             <input
               type="search"
               value={draftQuery}
-              maxLength={200}
               onChange={(event) => setDraftQuery(event.target.value)}
               placeholder="Найти степ по названию…"
             />
@@ -421,9 +424,9 @@ function Catalog() {
                 {steps.loading && (
                   <p className="updating">Обновляем результаты…</p>
                 )}
-                {page.items.length > 0 ? (
+                {page.content.length > 0 ? (
                   <div className="step-grid">
-                    {page.items.map((step) => (
+                    {page.content.map((step) => (
                       <StepCard key={step.id} step={step} from={from} />
                     ))}
                   </div>
@@ -458,7 +461,7 @@ function Catalog() {
                     </div>
                   </div>
                 )}
-                {page.totalPages > 1 && (
+                {page.page.totalPages > 1 && (
                   <nav className="pagination" aria-label="Страницы каталога">
                     <button
                       type="button"
@@ -472,12 +475,13 @@ function Catalog() {
                       ← Назад
                     </button>
                     <span>
-                      Страница {page.page + 1} из {page.totalPages}
+                      Страница {page.page.number + 1} из {page.page.totalPages}
                     </span>
                     <button
                       type="button"
                       disabled={
-                        filters.page + 1 >= page.totalPages || steps.loading
+                        filters.page + 1 >= page.page.totalPages ||
+                        steps.loading
                       }
                       onClick={() =>
                         setParams(
@@ -560,7 +564,7 @@ function Detail() {
           <div className="detail-card__divider" />
           <div className="detail-card__author">
             <span>Автор движения</span>
-            <strong>{state.data.author.name}</strong>
+            <strong>{state.data.author?.name ?? "Не указан"}</strong>
           </div>
         </article>
       )}

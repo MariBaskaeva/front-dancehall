@@ -13,7 +13,7 @@ const oldStep = {
   slug: "old-step",
   name: "Старый степ",
   style: "MALE",
-  era: "OLD_SCHOOL",
+  era: "OLD",
   author,
 };
 const newStep = {
@@ -34,11 +34,8 @@ it("ignores an old response after the filters change", async () => {
     if (input.includes("style=FEMALE"))
       return Promise.resolve(
         Response.json({
-          items: [newStep],
-          page: 0,
-          size: 20,
-          totalElements: 1,
-          totalPages: 1,
+          content: [newStep],
+          page: { number: 0, size: 20, totalElements: 1, totalPages: 1 },
         }),
       );
     return new Promise<Response>((resolve) => {
@@ -62,11 +59,8 @@ it("ignores an old response after the filters change", async () => {
   ).toBeInTheDocument();
   resolveOld(
     Response.json({
-      items: [oldStep],
-      page: 0,
-      size: 20,
-      totalElements: 1,
-      totalPages: 1,
+      content: [oldStep],
+      page: { number: 0, size: 20, totalElements: 1, totalPages: 1 },
     }),
   );
   await waitFor(() =>
@@ -82,11 +76,8 @@ it("normalizes invalid URL filters before requesting the catalog", async () => {
       ? Promise.resolve(Response.json({ items: [author] }))
       : Promise.resolve(
           Response.json({
-            items: [],
-            page: 0,
-            size: 20,
-            totalElements: 0,
-            totalPages: 0,
+            content: [],
+            page: { number: 0, size: 20, totalElements: 0, totalPages: 0 },
           }),
         ),
   );

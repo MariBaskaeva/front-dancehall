@@ -19,15 +19,12 @@ const step = {
   slug: "bogle",
   name: "Богл",
   style: "MALE",
-  era: "OLD_SCHOOL",
+  era: "OLD",
   author,
 };
 const page = {
-  items: [step],
-  page: 0,
-  size: 20,
-  totalElements: 1,
-  totalPages: 1,
+  content: [step],
+  page: { number: 0, size: 20, totalElements: 1, totalPages: 1 },
 };
 
 function open(path = "/") {
@@ -92,7 +89,7 @@ describe("catalog", () => {
         urls.some(
           (url) =>
             url.includes("style=FEMALE") &&
-            url.includes("era=OLD_SCHOOL") &&
+            url.includes("era=OLD") &&
             url.includes("author=bogle") &&
             url.includes("page=0"),
         ),
@@ -102,11 +99,8 @@ describe("catalog", () => {
 
   it("debounces search and distinguishes no results from an empty catalog", async () => {
     const fetchMock = mockApi({
-      items: [],
-      page: 0,
-      size: 20,
-      totalElements: 0,
-      totalPages: 0,
+      content: [],
+      page: { number: 0, size: 20, totalElements: 0, totalPages: 0 },
     });
     open();
     expect(await screen.findByText("Каталог пока пуст")).toBeInTheDocument();
@@ -127,7 +121,26 @@ describe("catalog", () => {
   });
 
   it("moves between result pages", async () => {
-    const fetchMock = mockApi({ ...page, totalElements: 21, totalPages: 2 });
+    const fetchMock = vi.fn((input: string) =>
+      Promise.resolve(
+        Response.json(
+          input.includes("/authors")
+            ? { items: [author] }
+            : {
+                ...page,
+                page: {
+                  ...page.page,
+                  number: Number(
+                    new URL(input, "http://localhost").searchParams.get("page"),
+                  ),
+                  totalElements: 21,
+                  totalPages: 2,
+                },
+              },
+        ),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
     open();
     await screen.findByText("Страница 1 из 2");
     fireEvent.click(screen.getByRole("button", { name: "Вперёд →" }));
@@ -136,6 +149,26 @@ describe("catalog", () => {
         fetchMock.mock.calls.some((call) => String(call[0]).includes("page=1")),
       ).toBe(true),
     );
+  });
+
+  it("preserves long searches and arbitrary author slugs from URLs", async () => {
+    const fetchMock = mockApi();
+    const query = "a".repeat(250);
+    open(`/?q=${query}&author=Author_With_Spaces&era=EARLY_NEW&era=UNKNOWN`);
+    await screen.findByRole("link", { name: /Богл/ });
+    const urls = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .filter((url) => url.includes("/steps?"));
+    expect(
+      urls.every((url) => {
+        const params = new URL(url, "http://localhost").searchParams;
+        return (
+          params.get("q") === query &&
+          params.get("author") === "Author_With_Spaces" &&
+          params.getAll("era").join(",") === "EARLY_NEW,UNKNOWN"
+        );
+      }),
+    ).toBe(true);
   });
 
   it("shows a missing catalog as unavailable and retries", async () => {
@@ -210,6 +243,28 @@ describe("step detail and navigation", () => {
       "aria-pressed",
       "true",
     );
+  });
+
+  it("renders a step without an author in the catalog and detail", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string) =>
+        Promise.resolve(
+          Response.json(
+            input.includes("/authors")
+              ? { items: [author] }
+              : input.includes("/steps/")
+                ? { ...step, author: null }
+                : { ...page, content: [{ ...step, author: null }] },
+          ),
+        ),
+      ),
+    );
+    open();
+    fireEvent.click(
+      await screen.findByRole("link", { name: /Автор: Не указан/ }),
+    );
+    expect(await screen.findByText("Не указан")).toBeInTheDocument();
   });
 
   it("shows a missing step and allows retry", async () => {
