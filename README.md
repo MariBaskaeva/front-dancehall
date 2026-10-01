@@ -1,7 +1,7 @@
 # front-dancehall
 
 Frontend каталога Dancehall Steps на React, TypeScript и Vite. Контракт API —
-[`openapi.yaml`](openapi.yaml).
+[`openapi.yml`](openapi.yml).
 
 ## Требования
 

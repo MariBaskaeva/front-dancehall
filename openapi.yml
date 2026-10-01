@@ -6,9 +6,9 @@ info:
   description: |
     Публичный read-only API каталога dancehall-степов.
 
-    Весь пользовательский контент возвращается на русском языке. API не
-    требует авторизации и не предоставляет операций создания, изменения или
-    удаления данных.
+    Названия степов и имена авторов возвращаются в том виде, в котором
+    хранятся в каталоге; язык не фиксирован. API не требует авторизации
+    и не предоставляет операций создания, изменения или удаления данных.
 
 servers:
   - url: /api/v1
@@ -33,8 +33,9 @@ paths:
         Возвращает страницу степов. Несколько значений одного фильтра
         объединяются через OR, а разные фильтры — через AND.
 
-        Элементы всегда упорядочиваются по `name` по возрастанию, затем по
-        `id`.
+        Порядок элементов не гарантирован: явная сортировка не задана.
+        Отрицательный `page` и `size` меньше 1 в текущей реализации
+        приводят к ответу 500, а не 400.
       parameters:
         - $ref: "#/components/parameters/SearchQuery"
         - $ref: "#/components/parameters/StyleFilter"
@@ -77,6 +78,8 @@ paths:
               examples:
                 step:
                   $ref: "#/components/examples/Step"
+                withoutAuthor:
+                  $ref: "#/components/examples/StepWithoutAuthor"
         "404":
           $ref: "#/components/responses/StepNotFound"
         "500":
@@ -112,13 +115,12 @@ components:
       in: query
       required: false
       description: |
-        Подстрока для поиска по `name` без учёта регистра. Пустую строку
-        следует передавать как отсутствие параметра.
+        Поиск по `name` без учёта регистра. Пустая строка и строка только
+        из пробелов не применяют фильтр. Ограничение длины не задано.
+        Символы `%` и `_` интерпретируются как шаблоны SQL LIKE.
       schema:
         type: string
-        minLength: 1
-        maxLength: 200
-      example: богл
+      example: Bitter
 
     StyleFilter:
       name: style
@@ -131,7 +133,6 @@ components:
       explode: true
       schema:
         type: array
-        uniqueItems: true
         items:
           $ref: "#/components/schemas/StepStyle"
 
@@ -141,12 +142,11 @@ components:
       required: false
       description: |
         Допустимые эры. Параметр можно повторять, например
-        `?era=OLD_SCHOOL&era=MIDDLE_SCHOOL`.
+        `?era=OLD&era=MIDDLE`.
       style: form
       explode: true
       schema:
         type: array
-        uniqueItems: true
         items:
           $ref: "#/components/schemas/StepEra"
 
@@ -155,23 +155,25 @@ components:
       in: query
       required: false
       description: |
-        Slug авторов. Параметр можно повторять; полный набор допустимых
-        значений возвращает `GET /authors`.
+        Slug авторов. Параметр можно повторять; значения возвращает
+        `GET /authors`. Неизвестный slug не вызывает ошибку,
+        а не находит совпадений.
       style: form
       explode: true
       schema:
         type: array
-        uniqueItems: true
         items:
-          $ref: "#/components/schemas/Slug"
+          type: string
       example:
-        - bogle
+        - kayti-insanity
 
     Page:
       name: page
       in: query
       required: false
-      description: Номер страницы, начиная с нуля.
+      description: |
+        Номер страницы, начиная с нуля. Отрицательное значение
+        в текущей реализации приводит к ответу 500.
       schema:
         type: integer
         format: int32
@@ -183,12 +185,13 @@ components:
       name: size
       in: query
       required: false
-      description: Количество элементов на странице.
+      description: |
+        Количество элементов на странице. Верхняя граница не задана.
+        Значение меньше 1 в текущей реализации приводит к ответу 500.
       schema:
         type: integer
         format: int32
         minimum: 1
-        maximum: 100
         default: 20
       example: 20
 
@@ -196,18 +199,16 @@ components:
       name: slug
       in: path
       required: true
-      description: Неизменяемый после публикации slug степа.
+      description: Slug степа. Неизвестный slug приводит к ответу 404.
       schema:
-        $ref: "#/components/schemas/Slug"
-      example: bogle
+        type: string
+      example: bitter-sweet
 
   schemas:
     Slug:
       type: string
-      minLength: 1
-      maxLength: 120
-      pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-      description: Уникальный URL-safe идентификатор в нижнем регистре.
+      maxLength: 255
+      description: Уникальный строковый идентификатор записи в каталоге.
 
     StepStyle:
       type: string
@@ -219,9 +220,11 @@ components:
     StepEra:
       type: string
       enum:
-        - OLD_SCHOOL
-        - MIDDLE_SCHOOL
-        - NEW_SCHOOL
+        - OLD
+        - MIDDLE
+        - EARLY_NEW
+        - NEW
+        - UNKNOWN
       description: Эра, к которой относится степ.
 
     Author:
@@ -241,9 +244,8 @@ components:
           $ref: "#/components/schemas/Slug"
         name:
           type: string
-          minLength: 1
           maxLength: 200
-          description: Имя автора на русском языке.
+          description: Имя автора в каталоге.
 
     Step:
       type: object
@@ -265,41 +267,51 @@ components:
           $ref: "#/components/schemas/Slug"
         name:
           type: string
-          minLength: 1
           maxLength: 200
-          description: Название степа на русском языке.
+          description: Название степа в каталоге.
         style:
           $ref: "#/components/schemas/StepStyle"
         era:
           $ref: "#/components/schemas/StepEra"
         author:
-          $ref: "#/components/schemas/Author"
+          description: Автор степа; null, если автор не указан.
+          oneOf:
+            - $ref: "#/components/schemas/Author"
+            - type: "null"
 
     StepPage:
       type: object
       additionalProperties: false
       required:
-        - items
+        - content
         - page
-        - size
-        - totalElements
-        - totalPages
       properties:
-        items:
+        content:
           type: array
           items:
             $ref: "#/components/schemas/Step"
         page:
-          type: integer
-          format: int32
-          minimum: 0
-          description: Номер текущей страницы, начиная с нуля.
+          $ref: "#/components/schemas/PageMetadata"
+
+    PageMetadata:
+      type: object
+      additionalProperties: false
+      required:
+        - size
+        - number
+        - totalElements
+        - totalPages
+      properties:
         size:
           type: integer
-          format: int32
+          format: int64
           minimum: 1
-          maximum: 100
           description: Запрошенный размер страницы.
+        number:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Номер текущей страницы, начиная с нуля.
         totalElements:
           type: integer
           format: int64
@@ -307,7 +319,7 @@ components:
           description: Общее количество степов с учётом фильтров.
         totalPages:
           type: integer
-          format: int32
+          format: int64
           minimum: 0
           description: Общее количество страниц с учётом фильтров.
 
@@ -322,120 +334,141 @@ components:
           items:
             $ref: "#/components/schemas/Author"
 
-    Problem:
+    ErrorResponse:
       type: object
-      description: Описание ошибки в формате Problem Details.
+      additionalProperties: false
+      description: Ошибка поиска степа по slug.
       required:
-        - title
-        - status
+        - code
+        - message
       properties:
-        type:
+        code:
           type: string
-          format: uri-reference
-          default: about:blank
-          description: URI, идентифицирующий тип ошибки.
-        title:
+          const: STEP_NOT_FOUND
+        message:
           type: string
-          description: Краткое описание типа ошибки.
+          description: Сообщение об ошибке на английском языке.
+
+    HttpError:
+      type: object
+      description: Стандартный JSON-ответ Spring Boot для ошибок 400 и 500.
+      required:
+        - timestamp
+        - status
+        - error
+        - path
+      properties:
+        timestamp:
+          type: string
+          format: date-time
         status:
           type: integer
           minimum: 100
           maximum: 599
-          description: HTTP-статус ответа.
-        detail:
+        error:
           type: string
-          description: Описание конкретной ошибки.
-        instance:
+          description: Название HTTP-ошибки.
+        path:
           type: string
-          format: uri-reference
-          description: URI, идентифицирующий конкретное возникновение ошибки.
+          description: Путь запроса без query-параметров.
 
   responses:
     BadRequest:
-      description: Некорректные параметры запроса
+      description: Некорректный тип параметра или неизвестное значение enum.
       content:
-        application/problem+json:
+        application/json:
           schema:
-            $ref: "#/components/schemas/Problem"
+            $ref: "#/components/schemas/HttpError"
           examples:
-            invalidSize:
+            invalidEra:
+              summary: Запрос с era=OLD_SCHOOL вместо era=OLD
               value:
-                type: https://dancehall.example/problems/invalid-request
-                title: Некорректный запрос
+                timestamp: "2026-10-01T12:56:24.245Z"
                 status: 400
-                detail: Параметр size должен быть в диапазоне от 1 до 100.
-                instance: /api/v1/steps?size=101
+                error: Bad Request
+                path: /api/v1/steps
 
     StepNotFound:
-      description: Степ с указанным slug не найден
+      description: Степ с указанным slug не найден.
       content:
-        application/problem+json:
+        application/json:
           schema:
-            $ref: "#/components/schemas/Problem"
+            $ref: "#/components/schemas/ErrorResponse"
           examples:
             notFound:
               value:
-                type: https://dancehall.example/problems/step-not-found
-                title: Степ не найден
-                status: 404
-                detail: Степ с slug unknown-step не найден.
-                instance: /api/v1/steps/unknown-step
+                code: STEP_NOT_FOUND
+                message: "Step with slug 'unknown-step' not found"
 
     InternalServerError:
-      description: Внутренняя ошибка сервера
+      description: |
+        Внутренняя ошибка сервера. Для GET /steps этот статус также
+        возвращается при отрицательном page или size меньше 1.
       content:
-        application/problem+json:
+        application/json:
           schema:
-            $ref: "#/components/schemas/Problem"
+            $ref: "#/components/schemas/HttpError"
           examples:
-            internalError:
+            invalidSize:
+              summary: Запрос GET /steps?size=0
               value:
-                type: https://dancehall.example/problems/internal-error
-                title: Внутренняя ошибка сервера
+                timestamp: "2026-10-01T12:56:30.472Z"
                 status: 500
-                detail: Не удалось обработать запрос.
+                error: Internal Server Error
+                path: /api/v1/steps
 
   examples:
     Step:
       value:
         id: 1f891828-92f8-4ff4-82f7-4b3f1ab6277e
-        slug: bogle
-        name: Богл
-        style: MALE
-        era: OLD_SCHOOL
+        slug: bitter-sweet
+        name: Bitter Sweet
+        style: FEMALE
+        era: NEW
         author:
           id: 6c9ee243-997a-4997-9236-5a5ef855791f
-          slug: bogle
-          name: Богл
+          slug: kayti-insanity
+          name: Kayti Insanity
+
+    StepWithoutAuthor:
+      value:
+        id: b1736ca6-eed8-4b87-ba98-5ce1626497e5
+        slug: wata-pumpie
+        name: Wata pumpie
+        style: FEMALE
+        era: OLD
+        author: null
 
     StepPage:
       value:
-        items:
+        content:
           - id: 1f891828-92f8-4ff4-82f7-4b3f1ab6277e
-            slug: bogle
-            name: Богл
-            style: MALE
-            era: OLD_SCHOOL
+            slug: bitter-sweet
+            name: Bitter Sweet
+            style: FEMALE
+            era: NEW
             author:
               id: 6c9ee243-997a-4997-9236-5a5ef855791f
-              slug: bogle
-              name: Богл
-        page: 0
-        size: 20
-        totalElements: 1
-        totalPages: 1
+              slug: kayti-insanity
+              name: Kayti Insanity
+        page:
+          size: 20
+          number: 0
+          totalElements: 1
+          totalPages: 1
 
     EmptyStepPage:
       value:
-        items: []
-        page: 0
-        size: 20
-        totalElements: 0
-        totalPages: 0
+        content: []
+        page:
+          size: 20
+          number: 0
+          totalElements: 0
+          totalPages: 0
 
     AuthorCollection:
       value:
         items:
           - id: 6c9ee243-997a-4997-9236-5a5ef855791f
-            slug: bogle
-            name: Богл
+            slug: kayti-insanity
+            name: Kayti Insanity

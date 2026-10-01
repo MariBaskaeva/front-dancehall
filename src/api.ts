@@ -2,7 +2,7 @@ export const API_BASE = "/api/v1";
 const REQUEST_TIMEOUT_MS = 10_000;
 
 export const STYLES = ["FEMALE", "MALE"] as const;
-export const ERAS = ["OLD_SCHOOL", "MIDDLE_SCHOOL", "NEW_SCHOOL"] as const;
+export const ERAS = ["OLD", "MIDDLE", "EARLY_NEW", "NEW", "UNKNOWN"] as const;
 
 export type StepStyle = (typeof STYLES)[number];
 export type StepEra = (typeof ERAS)[number];
@@ -19,12 +19,16 @@ export interface Step {
   name: string;
   style: StepStyle;
   era: StepEra;
-  author: Author;
+  author: Author | null;
 }
 
 export interface StepPage {
-  items: Step[];
-  page: number;
+  content: Step[];
+  page: PageMetadata;
+}
+
+export interface PageMetadata {
+  number: number;
   size: number;
   totalElements: number;
   totalPages: number;
@@ -61,46 +65,46 @@ const isUuid = (value: unknown): value is string =>
   isString(value) &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
-const isSlug = (value: unknown): value is string =>
-  isString(value) && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value);
+const isBoundedString = (value: unknown, maxLength: number): value is string =>
+  typeof value === "string" && value.length <= maxLength;
 
 export const isAuthor = (value: unknown): value is Author =>
   isRecord(value) &&
   isUuid(value.id) &&
-  isSlug(value.slug) &&
-  isString(value.name);
+  isBoundedString(value.slug, 255) &&
+  isBoundedString(value.name, 200);
 
 export const isStep = (value: unknown): value is Step =>
   isRecord(value) &&
   isUuid(value.id) &&
-  isSlug(value.slug) &&
-  isString(value.name) &&
+  isBoundedString(value.slug, 255) &&
+  isBoundedString(value.name, 200) &&
   STYLES.includes(value.style as StepStyle) &&
   ERAS.includes(value.era as StepEra) &&
-  isAuthor(value.author);
+  (value.author === null || isAuthor(value.author));
 
 const isNonNegativeInteger = (value: unknown): value is number =>
   Number.isSafeInteger(value) && typeof value === "number" && value >= 0;
 
 export const isStepPage = (value: unknown): value is StepPage =>
   isRecord(value) &&
-  Array.isArray(value.items) &&
-  value.items.every(isStep) &&
-  isNonNegativeInteger(value.page) &&
-  isNonNegativeInteger(value.size) &&
-  value.size >= 1 &&
-  value.size <= 100 &&
-  isNonNegativeInteger(value.totalElements) &&
-  isNonNegativeInteger(value.totalPages);
+  Array.isArray(value.content) &&
+  value.content.every(isStep) &&
+  isRecord(value.page) &&
+  isNonNegativeInteger(value.page.number) &&
+  isNonNegativeInteger(value.page.size) &&
+  value.page.size >= 1 &&
+  isNonNegativeInteger(value.page.totalElements) &&
+  isNonNegativeInteger(value.page.totalPages);
 
 const isAuthorCollection = (value: unknown): value is { items: Author[] } =>
   isRecord(value) && Array.isArray(value.items) && value.items.every(isAuthor);
 
-function problemDetail(value: unknown): string | undefined {
+function errorDetail(value: unknown): string | undefined {
   if (!isRecord(value)) return undefined;
-  if (typeof value.detail === "string" && value.detail.trim())
-    return value.detail;
-  if (typeof value.title === "string" && value.title.trim()) return value.title;
+  if (typeof value.message === "string" && value.message.trim())
+    return value.message;
+  if (typeof value.error === "string" && value.error.trim()) return value.error;
   return undefined;
 }
 
@@ -121,18 +125,18 @@ async function request<T>(
   try {
     if (signal?.aborted) controller.abort();
     const response = await fetch(`${API_BASE}${path}`, {
-      headers: { Accept: "application/json, application/problem+json" },
+      headers: { Accept: "application/json" },
       signal: controller.signal,
     });
     const contentType =
       response.headers.get("content-type")?.toLowerCase() ?? "";
     if (!response.ok) {
       let detail: string | undefined;
-      if (contentType.includes("application/problem+json")) {
+      if (contentType.includes("application/json")) {
         try {
-          detail = problemDetail(await response.json());
+          detail = errorDetail(await response.json());
         } catch {
-          // HTTP status remains useful even when the problem body is malformed.
+          // HTTP status remains useful even when the error body is malformed.
         }
       }
       throw new ApiError("http", response.status, detail);
