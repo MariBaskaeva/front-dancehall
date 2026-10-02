@@ -49,6 +49,8 @@ export class ApiError extends Error {
     public readonly kind: ApiErrorKind,
     public readonly status?: number,
     public readonly detail?: string,
+    public readonly code?: string,
+    public readonly retryAfter?: number,
   ) {
     super(detail ?? kind);
     this.name = "ApiError";
@@ -108,10 +110,21 @@ function errorDetail(value: unknown): string | undefined {
   return undefined;
 }
 
-async function request<T>(
+export function retryAfterSeconds(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = /^\d+$/.test(value)
+    ? Number(value)
+    : (Date.parse(value) - Date.now()) / 1000;
+  return Number.isFinite(seconds) && seconds > 0
+    ? Math.ceil(seconds)
+    : undefined;
+}
+
+export async function request<T = void>(
   path: string,
-  guard: (value: unknown) => value is T,
+  guard: ((value: unknown) => value is T) | undefined,
   signal?: AbortSignal,
+  options: { method?: "GET" | "POST"; body?: unknown; csrfToken?: string } = {},
 ): Promise<T> {
   const controller = new AbortController();
   let timedOut = false;
@@ -125,22 +138,48 @@ async function request<T>(
   try {
     if (signal?.aborted) controller.abort();
     const response = await fetch(`${API_BASE}${path}`, {
-      headers: { Accept: "application/json" },
+      method: options.method ?? "GET",
+      credentials: "include",
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+        ...(options.method === "POST"
+          ? { "Content-Type": "application/json" }
+          : {}),
+        ...(options.csrfToken ? { "X-CSRF-TOKEN": options.csrfToken } : {}),
+      },
+      ...(options.body !== undefined
+        ? { body: JSON.stringify(options.body) }
+        : {}),
       signal: controller.signal,
     });
     const contentType =
       response.headers.get("content-type")?.toLowerCase() ?? "";
     if (!response.ok) {
       let detail: string | undefined;
+      let code: string | undefined;
       if (contentType.includes("application/json")) {
         try {
-          detail = errorDetail(await response.json());
+          const data: unknown = await response.json();
+          detail = errorDetail(data);
+          if (isRecord(data) && typeof data.code === "string") code = data.code;
         } catch {
           // HTTP status remains useful even when the error body is malformed.
         }
       }
-      throw new ApiError("http", response.status, detail);
+      throw new ApiError(
+        "http",
+        response.status,
+        detail,
+        code,
+        retryAfterSeconds(response.headers.get("Retry-After")),
+      );
     }
+    if (response.status === 202 || response.status === 204) {
+      if (guard) throw new ApiError("invalid");
+      return undefined as T;
+    }
+    if (!guard) throw new ApiError("invalid");
     if (!contentType.includes("application/json"))
       throw new ApiError("invalid");
     let data: unknown;
