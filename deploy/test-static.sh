@@ -72,15 +72,17 @@ if (!assetResponse.ok) {
   throw new Error(`JavaScript asset returned ${assetResponse.status}`)
 }
 
-const detailResponse = await fetch(`${baseUrl}/steps/example`, {
-  signal: AbortSignal.timeout(2_000),
-})
-if (!detailResponse.ok) {
-  throw new Error(`Direct step route returned ${detailResponse.status}`)
-}
-const detailHtml = await detailResponse.text()
-if (!detailHtml.includes(marker)) {
-  throw new Error('Direct step route did not return the SPA shell')
+for (const path of ['/steps/example', '/register', '/verify-email', '/login', '/forgot-password', '/reset-password', '/profile']) {
+  const routeResponse = await fetch(`${baseUrl}${path}`, {
+    signal: AbortSignal.timeout(2_000),
+  })
+  if (!routeResponse.ok) {
+    throw new Error(`Direct route ${path} returned ${routeResponse.status}`)
+  }
+  const routeHtml = await routeResponse.text()
+  if (!routeHtml.includes(marker)) {
+    throw new Error(`Direct route ${path} did not return the SPA shell`)
+  }
 }
 
 console.log(`Static frontend smoke test passed for revision ${revision}`)
