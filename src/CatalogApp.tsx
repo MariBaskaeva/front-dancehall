@@ -21,6 +21,16 @@ import {
   type StepPage,
   type StepStyle,
 } from "./api";
+import AuthProvider from "./AuthProvider";
+import SiteHeader from "./SiteHeader";
+import {
+  RegisterPage,
+  VerifyEmailPage,
+  LoginPage,
+  ForgotPasswordPage,
+  ResetPasswordPage,
+  ProfilePage,
+} from "./AuthPages";
 
 const styleLabels: Record<StepStyle, string> = {
   FEMALE: "Female",
@@ -260,13 +270,7 @@ function Catalog() {
 
   return (
     <main className="app-shell">
-      <header className="site-header">
-        <Link className="brand" to="/" aria-label="Dancehall — каталог">
-          D<span>H</span>
-          <span className="brand__dot">.</span>
-        </Link>
-        <span className="header-caption">Энциклопедия движений</span>
-      </header>
+      <SiteHeader />
       <section className="hero" aria-labelledby="page-title">
         <div className="hero__copy">
           <p className="eyebrow">Твой гид по dancehall</p>
@@ -533,13 +537,7 @@ function Detail() {
   }, [slug, retry]);
   return (
     <main className="app-shell detail-shell">
-      <header className="site-header">
-        <Link className="brand" to="/" aria-label="Dancehall — каталог">
-          D<span>H</span>
-          <span className="brand__dot">.</span>
-        </Link>
-        <span className="header-caption">Энциклопедия движений</span>
-      </header>
+      <SiteHeader />
       <Link className="back-link" to={back}>
         ← Вернуться в каталог
       </Link>
@@ -578,6 +576,7 @@ function Detail() {
 function NotFound() {
   return (
     <main className="app-shell detail-shell">
+      <SiteHeader />
       <div className="feedback feedback--error">
         <span className="feedback__icon" aria-hidden="true">
           404
@@ -596,10 +595,18 @@ function NotFound() {
 
 export default function CatalogApp() {
   return (
-    <Routes>
-      <Route path="/" element={<Catalog />} />
-      <Route path="/steps/:slug" element={<Detail />} />
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+    <AuthProvider>
+      <Routes>
+        <Route path="/" element={<Catalog />} />
+        <Route path="/steps/:slug" element={<Detail />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </AuthProvider>
   );
 }

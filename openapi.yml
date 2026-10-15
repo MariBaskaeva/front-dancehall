@@ -1,14 +1,21 @@
 openapi: 3.1.0
 
 info:
-  title: Dancehall Steps API
-  version: 1.0.0
+  title: Dancehall API
+  version: 1.1.0
   description: |
-    Публичный read-only API каталога dancehall-степов.
+    API каталога dancehall-степов и проектируемый контракт пользователей.
 
-    Названия степов и имена авторов возвращаются в том виде, в котором
-    хранятся в каталоге; язык не фиксирован. API не требует авторизации
-    и не предоставляет операций создания, изменения или удаления данных.
+    Каталог остаётся публичным и доступным только для чтения. Названия
+    степов и имена авторов возвращаются в том виде, в котором хранятся
+    в каталоге; язык не фиксирован.
+
+    Операции Auth и Users описывают целевой контракт и пока не реализованы.
+    Вход выполняется по email и паролю после подтверждения почты.
+    Авторизованная сессия действует 7 дней от входа без продления при активности.
+    Перед POST клиент получает cookie и CSRF-токен через GET /auth/csrf;
+    после входа и выхода CSRF-токен необходимо получить повторно.
+    Все ответы Auth и Users используют Cache-Control: no-store.
 
 servers:
   - url: /api/v1
@@ -21,6 +28,10 @@ tags:
     description: Поиск и просмотр dancehall-степов
   - name: Authors
     description: Справочник авторов для фильтра каталога
+  - name: Auth
+    description: Проектируемые регистрация, вход и восстановление доступа
+  - name: Users
+    description: Проектируемый профиль текущего пользователя
 
 paths:
   /steps:
@@ -108,7 +119,360 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /auth/csrf:
+    get:
+      tags:
+        - Auth
+      operationId: getCsrfToken
+      summary: Получить CSRF-токен
+      description:
+        Создаёт анонимную сессию, если её нет. Авторизованную сессию сохраняет. Перед POST клиент
+        отправляет полученную cookie SESSION и токен в X-CSRF-TOKEN. После входа и выхода токен нужно получить
+        повторно.
+      responses:
+        "200":
+          description: Токен для текущей сессии
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/SessionCookie"
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CsrfTokenResponse"
+              examples:
+                CsrfTokenResponse:
+                  $ref: "#/components/examples/CsrfTokenResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /auth/register:
+    post:
+      tags:
+        - Auth
+      operationId: registerUser
+      summary: Зарегистрироваться
+      description: |-
+        Создаёт неподтверждённый аккаунт и инициирует отправку письма.
+        Вход до подтверждения email запрещён.
+        Для нового и существующего email возвращает одинаковый 202 без тела.
+        Повторная регистрация не изменяет аккаунт и не отправляет новое письмо.
+
+        Для повторной отправки письма используйте POST /auth/resend-verification.
+      security:
+        - SessionCookie: []
+          CsrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+            examples:
+              RegisterRequest:
+                $ref: "#/components/examples/RegisterRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/EmailRequestAccepted"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "403":
+          $ref: "#/components/responses/CsrfError"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /auth/verify-email:
+    post:
+      tags:
+        - Auth
+      operationId: verifyEmail
+      summary: Подтвердить email
+      description: |
+        Одноразовая ссылка действует 24 часа. Подтверждение не выполняет вход.
+        Неверный, истёкший, заменённый, использованный токен или токен
+        восстановления возвращает INVALID_OR_EXPIRED_TOKEN.
+      security:
+        - SessionCookie: []
+          CsrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TokenRequest"
+            examples:
+              TokenRequest:
+                $ref: "#/components/examples/TokenRequest"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/TokenRequestError"
+        "403":
+          $ref: "#/components/responses/CsrfError"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /auth/resend-verification:
+    post:
+      tags:
+        - Auth
+      operationId: resendVerificationEmail
+      summary: Повторно запросить письмо подтверждения
+      description: |
+        Отправляет письмо только для существующего неподтверждённого аккаунта.
+        Новая ссылка заменяет предыдущую. Повторная отправка доступна
+        не чаще раза в минуту; более частый запрос не выдаёт новую ссылку.
+        Во всех этих случаях возвращает одинаковый 202 без тела.
+      security:
+        - SessionCookie: []
+          CsrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailRequest"
+            examples:
+              EmailRequest:
+                $ref: "#/components/examples/EmailRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/EmailRequestAccepted"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "403":
+          $ref: "#/components/responses/CsrfError"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /auth/login:
+    post:
+      tags:
+        - Auth
+      operationId: loginUser
+      summary: Войти
+      description: |
+        Меняет идентификатор сессии и возвращает профиль.
+        Сессия действует 7 дней от успешного входа без продления при активности.
+        EMAIL_NOT_VERIFIED возвращается только после проверки правильного пароля.
+      security:
+        - SessionCookie: []
+          CsrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            examples:
+              LoginRequest:
+                $ref: "#/components/examples/LoginRequest"
+      responses:
+        "200":
+          description: Вход выполнен
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/SessionCookie"
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+              examples:
+                UserProfile:
+                  $ref: "#/components/examples/UserProfile"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/InvalidCredentials"
+        "403":
+          $ref: "#/components/responses/LoginForbidden"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /auth/logout:
+    post:
+      tags:
+        - Auth
+      operationId: logoutUser
+      summary: Выйти из текущей сессии
+      description: |
+        Завершает текущую сессию и удаляет cookie. Другие устройства сохраняют вход.
+        Повторный выход с актуальным CSRF-токеном возвращает 204.
+      security:
+        - SessionCookie: []
+          CsrfToken: []
+      responses:
+        "204":
+          description: Сессия завершена; тело отсутствует
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/DeletedSessionCookie"
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+        "403":
+          $ref: "#/components/responses/CsrfError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /auth/forgot-password:
+    post:
+      tags:
+        - Auth
+      operationId: requestPasswordReset
+      summary: Запросить восстановление пароля
+      description: |
+        Отправляет письмо только для существующего подтверждённого аккаунта.
+        Ссылка действует 30 минут; новая заменяет предыдущую.
+        Повторная отправка доступна не чаще раза в минуту; более частый
+        запрос не выдаёт новую ссылку. Возвращает одинаковый 202 без тела
+        независимо от наличия аккаунта и возможности отправить письмо.
+      security:
+        - SessionCookie: []
+          CsrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailRequest"
+            examples:
+              EmailRequest:
+                $ref: "#/components/examples/EmailRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/EmailRequestAccepted"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "403":
+          $ref: "#/components/responses/CsrfError"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /auth/reset-password:
+    post:
+      tags:
+        - Auth
+      operationId: resetPassword
+      summary: Установить новый пароль по ссылке
+      description: |
+        Использует токен однократно, меняет пароль и завершает все сессии пользователя.
+        Автоматический вход не выполняется.
+        Неверный, истёкший, заменённый, использованный токен или токен
+        подтверждения email возвращает INVALID_OR_EXPIRED_TOKEN.
+      security:
+        - SessionCookie: []
+          CsrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+            examples:
+              ResetPasswordRequest:
+                $ref: "#/components/examples/ResetPasswordRequest"
+      responses:
+        "204":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/TokenRequestError"
+        "403":
+          $ref: "#/components/responses/CsrfError"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /users/me:
+    get:
+      tags:
+        - Users
+      operationId: getCurrentUser
+      summary: Получить свой профиль
+      description: Требует авторизованную сессию. Отсутствующая, истёкшая или отозванная сессия даёт 401.
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: Профиль текущего пользователя
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/NoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+              examples:
+                UserProfile:
+                  $ref: "#/components/examples/UserProfile"
+        "401":
+          $ref: "#/components/responses/AuthenticationRequired"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
 components:
+  securitySchemes:
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: SESSION
+      description: |
+        Cookie сессии. Для POST допускается анонимная сессия,
+        выданная GET /auth/csrf; для GET /users/me нужен выполненный вход.
+    CsrfToken:
+      type: apiKey
+      in: header
+      name: X-CSRF-TOKEN
+      description: Токен из GET /auth/csrf для той же cookie SESSION.
+
+  headers:
+    NoStore:
+      schema:
+        type: string
+        const: no-store
+      example: no-store
+      required: true
+    SessionCookie:
+      description: |
+        Cookie сессии с HttpOnly, SameSite=Lax, Path=/api/v1, без Domain.
+        В production используется Secure. После входа Max-Age=604800.
+        GET /auth/csrf устанавливает cookie только при необходимости.
+      schema:
+        type: string
+      example: SESSION=example-session-id; Path=/api/v1; Max-Age=604800; Secure; HttpOnly; SameSite=Lax
+    DeletedSessionCookie:
+      description: Удаляет SESSION с Path=/api/v1 и Max-Age=0.
+      schema:
+        type: string
+      example: SESSION=; Path=/api/v1; Max-Age=0; Secure; HttpOnly; SameSite=Lax
+    RetryAfter:
+      description: Время до повторного запроса в секундах.
+      schema:
+        type: integer
+        minimum: 1
+      example: 60
+      required: true
+
   parameters:
     SearchQuery:
       name: q
@@ -372,6 +736,140 @@ components:
           type: string
           description: Путь запроса без query-параметров.
 
+    Email:
+      type: string
+      format: email
+      maxLength: 254
+      description:
+        Email нормализуется удалением крайних пробелов и приведением к нижнему регистру. Ограничения
+        format и maxLength проверяются после нормализации; точки и суффиксы с '+' не преобразуются.
+    NewPassword:
+      type: string
+      minLength: 15
+      maxLength: 128
+      writeOnly: true
+      description: Пробелы сохраняются. Обязательных сочетаний символов нет.
+    ActionToken:
+      type: string
+      minLength: 1
+      maxLength: 512
+      writeOnly: true
+      description: Непрозрачный одноразовый токен из письма.
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+        - password
+        - name
+      properties:
+        email:
+          $ref: "#/components/schemas/Email"
+        password:
+          $ref: "#/components/schemas/NewPassword"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Отображаемое имя; крайние пробелы удаляются, пустое имя запрещено.
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+        - password
+      properties:
+        email:
+          $ref: "#/components/schemas/Email"
+        password:
+          type: string
+          minLength: 1
+          maxLength: 128
+          writeOnly: true
+    EmailRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+      properties:
+        email:
+          $ref: "#/components/schemas/Email"
+    TokenRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+      properties:
+        token:
+          $ref: "#/components/schemas/ActionToken"
+    ResetPasswordRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+        - newPassword
+      properties:
+        token:
+          $ref: "#/components/schemas/ActionToken"
+        newPassword:
+          $ref: "#/components/schemas/NewPassword"
+    CsrfTokenResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - token
+        - headerName
+      properties:
+        token:
+          type: string
+          minLength: 1
+        headerName:
+          type: string
+          const: X-CSRF-TOKEN
+    UserProfile:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - email
+        - name
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        email:
+          $ref: "#/components/schemas/Email"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+    AuthErrorResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          enum:
+            - VALIDATION_ERROR
+            - INVALID_OR_EXPIRED_TOKEN
+            - INVALID_CREDENTIALS
+            - EMAIL_NOT_VERIFIED
+            - AUTHENTICATION_REQUIRED
+            - CSRF_INVALID
+            - UNSUPPORTED_MEDIA_TYPE
+            - TOO_MANY_REQUESTS
+            - INTERNAL_SERVER_ERROR
+        message:
+          type: string
+          description: Сообщение на английском языке. Клиент определяет сценарий по code.
+      description:
+        Ошибки проектируемых операций авторизации. Формат совпадает с ошибкой каталога, но коды
+        независимы. Клиент обрабатывает code, а не message.
+
   responses:
     BadRequest:
       description: Некорректный тип параметра или неизвестное значение enum.
@@ -416,6 +914,199 @@ components:
                 status: 500
                 error: Internal Server Error
                 path: /api/v1/steps
+
+    EmailRequestAccepted:
+      description: |
+        Запрос принят; тело отсутствует. Ответ не раскрывает наличие аккаунта
+        и не гарантирует отправку или доставку письма. Сбой отправки
+        не удаляет созданный аккаунт; клиент может запросить письмо повторно.
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+    NoContent:
+      description: Операция выполнена; тело отсутствует
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+    ValidationError:
+      description: "code: VALIDATION_ERROR — некорректный JSON, поля или значения"
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/AuthErrorResponse"
+              - type: object
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - VALIDATION_ERROR
+          examples:
+            VALIDATION_ERROR:
+              $ref: "#/components/examples/VALIDATION_ERROR"
+    TokenRequestError:
+      description: "code: VALIDATION_ERROR или INVALID_OR_EXPIRED_TOKEN"
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/AuthErrorResponse"
+              - type: object
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - VALIDATION_ERROR
+                      - INVALID_OR_EXPIRED_TOKEN
+          examples:
+            VALIDATION_ERROR:
+              $ref: "#/components/examples/VALIDATION_ERROR"
+            INVALID_OR_EXPIRED_TOKEN:
+              $ref: "#/components/examples/INVALID_OR_EXPIRED_TOKEN"
+    InvalidCredentials:
+      description: "code: INVALID_CREDENTIALS — неизвестный email или неверный пароль"
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/AuthErrorResponse"
+              - type: object
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - INVALID_CREDENTIALS
+          examples:
+            INVALID_CREDENTIALS:
+              $ref: "#/components/examples/INVALID_CREDENTIALS"
+    AuthenticationRequired:
+      description: "code: AUTHENTICATION_REQUIRED — нет действующей авторизованной сессии"
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/AuthErrorResponse"
+              - type: object
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - AUTHENTICATION_REQUIRED
+          examples:
+            AUTHENTICATION_REQUIRED:
+              $ref: "#/components/examples/AUTHENTICATION_REQUIRED"
+    CsrfError:
+      description: "code: CSRF_INVALID — нет действующей сессии или правильного CSRF-токена"
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/AuthErrorResponse"
+              - type: object
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - CSRF_INVALID
+          examples:
+            CSRF_INVALID:
+              $ref: "#/components/examples/CSRF_INVALID"
+    LoginForbidden:
+      description: "code: CSRF_INVALID или EMAIL_NOT_VERIFIED"
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/AuthErrorResponse"
+              - type: object
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - CSRF_INVALID
+                      - EMAIL_NOT_VERIFIED
+          examples:
+            CSRF_INVALID:
+              $ref: "#/components/examples/CSRF_INVALID"
+            EMAIL_NOT_VERIFIED:
+              $ref: "#/components/examples/EMAIL_NOT_VERIFIED"
+    UnsupportedMediaType:
+      description: "code: UNSUPPORTED_MEDIA_TYPE — требуется application/json"
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/AuthErrorResponse"
+              - type: object
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - UNSUPPORTED_MEDIA_TYPE
+          examples:
+            UNSUPPORTED_MEDIA_TYPE:
+              $ref: "#/components/examples/UNSUPPORTED_MEDIA_TYPE"
+    RateLimited:
+      description: "code: TOO_MANY_REQUESTS — превышена частота запросов"
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/AuthErrorResponse"
+              - type: object
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - TOO_MANY_REQUESTS
+          examples:
+            TOO_MANY_REQUESTS:
+              $ref: "#/components/examples/TOO_MANY_REQUESTS"
+    InternalError:
+      description: "Ошибка 500; code: INTERNAL_SERVER_ERROR. Ответ не содержит технических подробностей."
+      headers:
+        Cache-Control:
+          $ref: "#/components/headers/NoStore"
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/AuthErrorResponse"
+              - type: object
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - INTERNAL_SERVER_ERROR
+          examples:
+            INTERNAL_SERVER_ERROR:
+              $ref: "#/components/examples/INTERNAL_SERVER_ERROR"
 
   examples:
     Step:
@@ -472,3 +1163,68 @@ components:
           - id: 6c9ee243-997a-4997-9236-5a5ef855791f
             slug: kayti-insanity
             name: Kayti Insanity
+
+    RegisterRequest:
+      value:
+        email: dancer@example.com
+        password: Dancehall steps are fun!
+        name: Yaroslav
+    LoginRequest:
+      value:
+        email: dancer@example.com
+        password: Dancehall steps are fun!
+    EmailRequest:
+      value:
+        email: dancer@example.com
+    TokenRequest:
+      value:
+        token: example-opaque-email-verification-token
+    ResetPasswordRequest:
+      value:
+        token: example-opaque-password-reset-token
+        newPassword: My new dancehall password!
+    CsrfTokenResponse:
+      value:
+        token: example-opaque-csrf-token
+        headerName: X-CSRF-TOKEN
+    UserProfile:
+      value:
+        id: 4b029f20-5a26-4ad8-8377-0a1d7c6e80ad
+        email: dancer@example.com
+        name: Yaroslav
+    VALIDATION_ERROR:
+      value:
+        code: VALIDATION_ERROR
+        message: Request body is invalid
+    INVALID_OR_EXPIRED_TOKEN:
+      value:
+        code: INVALID_OR_EXPIRED_TOKEN
+        message: Token is invalid or expired
+    INVALID_CREDENTIALS:
+      value:
+        code: INVALID_CREDENTIALS
+        message: Invalid email or password
+    EMAIL_NOT_VERIFIED:
+      value:
+        code: EMAIL_NOT_VERIFIED
+        message: Email verification is required
+    AUTHENTICATION_REQUIRED:
+      value:
+        code: AUTHENTICATION_REQUIRED
+        message: Authentication is required
+    CSRF_INVALID:
+      value:
+        code: CSRF_INVALID
+        message: CSRF token is missing or invalid
+    UNSUPPORTED_MEDIA_TYPE:
+      value:
+        code: UNSUPPORTED_MEDIA_TYPE
+        message: Content-Type must be application/json
+    TOO_MANY_REQUESTS:
+      value:
+        code: TOO_MANY_REQUESTS
+        message: Too many requests
+    INTERNAL_SERVER_ERROR:
+      value:
+        code: INTERNAL_SERVER_ERROR
+        message: An internal server error occurred
